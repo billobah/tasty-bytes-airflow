@@ -1,0 +1,4 @@
+services:
+  scheduler:
+    volumes:
+      - C:/codebasics/dbt_module/tasty_bytes_dbt/tasty_dbt:/usr/local/airflow/dbt/tasty_dbt:ro
