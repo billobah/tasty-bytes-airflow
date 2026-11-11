@@ -1,45 +1,50 @@
-Overview
-========
+# Tasty Bytes : orchestration Airflow du projet dbt
 
-Welcome to Astronomer! This project was generated after you ran 'astro dev init' using the Astronomer CLI. This readme describes the contents of the project, as well as how to run Apache Airflow on your local machine.
+**[English version → README.en.md](README.en.md)**
 
-Project Contents
-================
+Projet Airflow (Astro CLI) qui lance **chaque jour, à 10 h (heure de Bruxelles)**, la mise à jour des modèles dbt du projet [`tasty-bytes-dbt-snowflake`](https://github.com/billobah/tasty-bytes-dbt-snowflake) sur Snowflake.
 
-Your Astro project contains the following files and folders:
+## En bref
 
-- dags: This folder contains the Python files for your Airflow Dags. By default, this directory includes one example Dag:
-    - `example_astronauts`: This Dag shows a simple ETL pipeline example that queries the list of astronauts currently in space from the Open Notify API and prints a statement for each astronaut. The Dag uses the TaskFlow API to define tasks in Python, and dynamic task mapping to dynamically print a statement for each astronaut. For more on how this Dag works, see our [Getting started tutorial](https://www.astronomer.io/docs/learn/get-started-with-airflow).
-- Dockerfile: This file contains a versioned Astro Runtime Docker image that provides a differentiated Airflow experience. If you want to execute other commands or overrides at runtime, specify them here.
-- include: This folder contains any additional files that you want to include as part of your project. It is empty by default.
-- packages.txt: Install OS-level packages needed for your project by adding them to this file. It is empty by default.
-- requirements.txt: Install Python packages needed for your project by adding them to this file. It is empty by default.
-- plugins: Add custom or community plugins for your project to this file. It is empty by default.
-- airflow_settings.yaml: Use this local-only file to specify Airflow Connections, Variables, and Pools instead of entering them in the Airflow UI as you develop Dags in this project.
+| | |
+|---|---|
+| Orchestrateur | Apache Airflow 3 (Astro Runtime 3.3) |
+| DAG principal | `tasty_bytes_dbt_daily` |
+| Planification | tous les jours à 10 h, fuseau Europe/Brussels (heure d'été gérée automatiquement) |
+| Commande exécutée | `dbt build --select tag:daily+` : les modèles marqués `daily` et leurs dépendants, tests inclus |
+| Rattrapage | désactivé (`catchup=False`) : une journée manquée n'est pas rejouée |
+| Connexion Snowflake | variables d'environnement, aucun secret dans le dépôt |
 
-Deploy Your Project Locally
-===========================
+## Fonctionnement
 
-Start Airflow on your local machine by running 'astro dev start'.
+```
+Airflow (conteneur Astro)
+   └─ DAG tasty_bytes_dbt_daily  ── tous les jours à 10 h
+        └─ tâche dbt_build_daily ── dbt build --select tag:daily+
+              └─ dbt (environnement virtuel dédié) ──► Snowflake
+```
 
-This command will spin up five Docker containers on your machine, each for a different Airflow component:
+1. L'image Docker (`Dockerfile`) installe dbt dans un environnement virtuel séparé, pour ne pas mélanger ses bibliothèques avec celles d'Airflow.
+2. Le dossier du projet dbt est monté en lecture seule dans le conteneur (`docker-compose.override.yml`).
+3. Le DAG lance `dbt build` sur les modèles de l'étiquette `daily` : les deux tables de faits (`fct_orders`, `fct_order_items`) et ce qui en dépend.
+4. Le profil de connexion (`include/dbt/profiles.yml`) lit tous ses paramètres dans des variables d'environnement. Le mot de passe n'est jamais écrit dans un fichier versionné.
 
-- Postgres: Airflow's Metadata Database
-- Scheduler: The Airflow component responsible for monitoring and triggering tasks
-- Dag Processor: The Airflow component responsible for parsing Dags
-- API Server: The Airflow component responsible for serving the Airflow UI and API
-- Triggerer: The Airflow component responsible for triggering deferred tasks
+## Lancer le projet
 
-When all five containers are ready the command will open the browser to the Airflow UI at http://localhost:8080/. You should also be able to access your Postgres Database at 'localhost:5432/postgres' with username 'postgres' and password 'postgres'.
+1. Installer Docker et l'[Astro CLI](https://www.astronomer.io/docs/astro/cli/install-cli).
+2. Cloner ce dépôt et le projet dbt, puis adapter le chemin du projet dbt dans `docker-compose.override.yml`.
+3. Définir les variables d'environnement de connexion : `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `DBT_ENV_SECRET_SNOWFLAKE_PASSWORD`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA` (par exemple dans un fichier `.env`, ignoré par Git).
+4. Démarrer Airflow : `astro dev start`.
+5. Ouvrir l'interface Airflow, activer le DAG `tasty_bytes_dbt_daily` et le lancer une première fois.
 
-Note: If you already have either of the above ports allocated, you can either [stop your existing Docker containers or change the port](https://www.astronomer.io/docs/astro/cli/troubleshoot-locally#ports-are-not-available-for-my-local-airflow-webserver).
+## Structure
 
-Deploy Your Project to Astronomer
-=================================
-
-If you have an Astronomer account, pushing code to a Deployment on Astronomer is simple. For deploying instructions, refer to Astronomer documentation: https://www.astronomer.io/docs/astro/deploy-code/
-
-Contact
-=======
-
-The Astronomer CLI is maintained with love by the Astronomer team. To report a bug or suggest a change, reach out to our support.
+```
+dags/
+├── tasty_bytes_dbt_daily.py   # DAG de mise à jour quotidienne
+└── exampledag.py              # exemple fourni par Astro (non utilisé par le projet)
+include/dbt/profiles.yml       # profil dbt, lu dans l'environnement
+Dockerfile                     # image Astro + dbt dans un environnement virtuel
+docker-compose.override.yml    # montage du projet dbt
+tests/dags/                    # tests d'intégrité des DAG
+```
